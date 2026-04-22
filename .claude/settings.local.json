@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx vite:*)",
+      "Bash(curl -L -o wasm/opencv/opencv.js \"https://docs.opencv.org/4.10.0/opencv.js\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5174/)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5175/)",
+      "Bash(curl -sk -o /dev/null -w \"%{http_code}\" https://localhost:5173/)",
+      "Bash(pkill -f \"vite\")",
+      "Bash(ipconfig)",
+      "Bash(curl -sk https://localhost:3000/ -o /dev/null -w \"%{http_code}\")",
+      "Bash(netsh advfirewall:*)",
+      "Bash(npx --yes localtunnel --port 3000 --local-https --allow-invalid-cert)"
+    ]
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "webslam",
+  "version": "0.1.0",
+  "description": "Web-based AR SDK with SLAM, plane detection, and image marker tracking",
+  "type": "module",
+  "main": "./dist/webslam.umd.cjs",
+  "module": "./dist/webslam.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/webslam.js",
+      "require": "./dist/webslam.umd.cjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "vite --config vite.demo.config.ts",
+    "build": "vite build",
+    "build:demo": "vite build --config vite.demo.config.ts",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vite-plugin-dts": "^4.3.0"
+  },
+  "license": "MIT"
+}
