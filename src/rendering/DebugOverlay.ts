@@ -82,15 +82,38 @@ export class DebugOverlay {
     this.drawStats();
   }
 
+  private slamState = 'initializing';
+  private mapPointCount = 0;
+  private keyframeCount = 0;
+  private inlierCount = 0;
+
   setMatchCount(count: number): void {
     this.matchCount = count;
   }
 
+  setSLAMState(state: string, mapPoints: number, keyframes: number, inliers: number): void {
+    this.slamState = state;
+    this.mapPointCount = mapPoints;
+    this.keyframeCount = keyframes;
+    this.inlierCount = inliers;
+  }
+
   private drawStats(): void {
+    const stateColors: Record<string, string> = {
+      uninitialized: '#888',
+      initializing: '#ff0',
+      tracking: '#0f0',
+      lost: '#f44',
+    };
+
     const lines = [
+      `SLAM: ${this.slamState.toUpperCase()}`,
       `FPS: ${this.fps}`,
       `Features: ${this.featureCount}`,
       `Matches: ${this.matchCount}`,
+      `Inliers: ${this.inlierCount}`,
+      `Map pts: ${this.mapPointCount}`,
+      `Keyframes: ${this.keyframeCount}`,
     ];
 
     this.ctx.font = '13px "SF Mono", Consolas, monospace';

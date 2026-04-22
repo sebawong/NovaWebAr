@@ -16,6 +16,7 @@ import { CameraBackground } from '../rendering/CameraBackground';
 import { DebugOverlay } from '../rendering/DebugOverlay';
 import { CVPipeline, CVFrameResult } from '../cv/CVPipeline';
 import { estimateIntrinsics, intrinsicsToFovY, CameraIntrinsics } from '../math/Projection';
+import { mat3ToQuaternion } from '../math/Quaternion';
 
 export class Session extends EventEmitter<SessionEventMap> {
   readonly scene: THREE.Scene;
@@ -37,8 +38,12 @@ export class Session extends EventEmitter<SessionEventMap> {
   private running = false;
   private animFrameId = 0;
   private currentPose: Pose | null = null;
+  private trackingState: 'initializing' | 'tracking' | 'lost' = 'initializing';
   private frameSkip = 0;
-  private cvProcessingInterval = 2; // Process every Nth frame for performance
+  private cvProcessingInterval = 2;
+
+  // Anchor: the position where the first 3D object is placed
+  private worldAnchor: THREE.Group;
 
   constructor(config: SessionConfig) {
     super();
@@ -51,6 +56,10 @@ export class Session extends EventEmitter<SessionEventMap> {
     this.threeCamera = new THREE.PerspectiveCamera(60, 1, 0.01, 1000);
     this.scene.add(this.threeCamera);
 
+    // World anchor group — objects added here stay fixed in world space
+    this.worldAnchor = new THREE.Group();
+    this.scene.add(this.worldAnchor);
+
     this.cameraManager = new CameraManager(this.cameraConfig);
     this.cameraFeed = new CameraFeed();
     this.arRenderer = new ARRenderer(this.container, this.scene, this.threeCamera);
@@ -59,7 +68,6 @@ export class Session extends EventEmitter<SessionEventMap> {
 
   async start(): Promise<void> {
     try {
-      // Start camera
       const stream = await this.cameraManager.start();
       this.cameraFeed.setStream(stream);
 
@@ -72,12 +80,12 @@ export class Session extends EventEmitter<SessionEventMap> {
       this.threeCamera.fov = intrinsicsToFovY(this.intrinsics);
       this.threeCamera.updateProjectionMatrix();
 
-      // Initialize CV pipeline
+      // Initialize CV pipeline with intrinsics for SLAM
       this.cvPipeline = new CVPipeline();
       this.cvPipeline.setOnFrame(this.onCVResult);
 
       try {
-        await this.cvPipeline.init('/opencv.js');
+        await this.cvPipeline.init('/opencv.js', this.intrinsics);
       } catch (err) {
         console.warn('[WebSLAM] CV pipeline failed to init, running without CV:', err);
         this.cvPipeline = null;
@@ -117,8 +125,36 @@ export class Session extends EventEmitter<SessionEventMap> {
   };
 
   private onCVResult = (result: CVFrameResult): void => {
+    // Update tracking state
+    const prevState = this.trackingState;
+    if (result.state === 'tracking') {
+      this.trackingState = 'tracking';
+      if (prevState !== 'tracking') {
+        this.emit('trackingRestored', undefined as never);
+      }
+    } else if (result.state === 'lost') {
+      this.trackingState = 'lost';
+      if (prevState === 'tracking') {
+        this.emit('trackingLost', undefined as never);
+      }
+    } else {
+      this.trackingState = 'initializing';
+    }
+
+    // Apply SLAM pose to Three.js camera
+    if (result.rotation && result.translation) {
+      this.applySLAMPose(result.rotation, result.translation);
+    }
+
+    // Update debug overlay
     if (this.debugOverlay && this.intrinsics) {
       this.debugOverlay.setMatchCount(result.matchCount);
+      this.debugOverlay.setSLAMState(
+        result.state,
+        result.mapPointCount,
+        result.keyframeCount,
+        result.inlierCount,
+      );
       this.debugOverlay.drawKeypoints(
         result.keypoints,
         this.intrinsics.width,
@@ -127,6 +163,40 @@ export class Session extends EventEmitter<SessionEventMap> {
     }
   };
 
+  private applySLAMPose(rotation: number[], translation: number[]): void {
+    // SLAM gives us [R|t] which transforms world→camera.
+    // Three.js camera needs the inverse: camera→world (camera's position in world).
+    const R = new Float64Array(rotation);
+    const t = new Float64Array(translation);
+
+    // Camera position in world = -R^T * t
+    const camX = -(R[0] * t[0] + R[3] * t[1] + R[6] * t[2]);
+    const camY = -(R[1] * t[0] + R[4] * t[1] + R[7] * t[2]);
+    const camZ = -(R[2] * t[0] + R[5] * t[1] + R[8] * t[2]);
+
+    this.threeCamera.position.set(camX, -camY, -camZ); // flip Y,Z for Three.js coords
+
+    // Camera rotation: quaternion from R^T
+    const Rt = new Float64Array([
+      R[0], R[3], R[6],
+      R[1], R[4], R[7],
+      R[2], R[5], R[8],
+    ]);
+    const q = mat3ToQuaternion(Rt);
+    // Flip to Three.js coordinate system (Y-up, Z-towards viewer)
+    this.threeCamera.quaternion.set(q.x, -q.y, -q.z, q.w);
+
+    // Build pose object for events
+    this.currentPose = {
+      position: this.threeCamera.position.clone(),
+      quaternion: this.threeCamera.quaternion.clone(),
+      projectionMatrix: this.threeCamera.projectionMatrix.clone(),
+      viewMatrix: this.threeCamera.matrixWorldInverse.clone(),
+    };
+
+    this.emit('poseUpdate', this.currentPose);
+  }
+
   async hitTest(_screenX: number, _screenY: number): Promise<HitTestResult | null> {
     // Phase 4: implement ray-plane intersection
     return null;
@@ -134,6 +204,11 @@ export class Session extends EventEmitter<SessionEventMap> {
 
   async addMarker(_name: string, _imageUrl: string): Promise<void> {
     // Phase 5: add marker to database
+  }
+
+  /** Group where world-anchored objects should be added */
+  get anchor(): THREE.Group {
+    return this.worldAnchor;
   }
 
   pause(): void {
@@ -184,5 +259,9 @@ export class Session extends EventEmitter<SessionEventMap> {
 
   get cameraIntrinsics(): CameraIntrinsics | null {
     return this.intrinsics;
+  }
+
+  get slamState(): string {
+    return this.trackingState;
   }
 }

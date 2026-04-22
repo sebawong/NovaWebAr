@@ -1,12 +1,18 @@
 import type { CVWorkerResponse } from './cv.worker';
 import { Keypoint } from './FeatureDetector';
-import { Match } from './FeatureMatcher';
+import { CameraIntrinsics } from '../math/Projection';
+import { SLAMState } from '../slam/SLAMEngine';
 
 export interface CVFrameResult {
   timestamp: number;
+  state: SLAMState;
+  rotation: number[] | null;
+  translation: number[] | null;
   keypoints: Keypoint[];
+  mapPointCount: number;
+  keyframeCount: number;
+  inlierCount: number;
   matchCount: number;
-  matches: Match[];
 }
 
 type FrameCallback = (result: CVFrameResult) => void;
@@ -18,7 +24,7 @@ export class CVPipeline {
   private processing = false;
   private pendingFrame: { imageData: ImageData; timestamp: number } | null = null;
 
-  async init(wasmPath?: string): Promise<void> {
+  async init(wasmPath?: string, intrinsics?: CameraIntrinsics): Promise<void> {
     return new Promise((resolve, reject) => {
       this.worker = new Worker(
         new URL('./cv.worker.ts', import.meta.url),
@@ -37,7 +43,7 @@ export class CVPipeline {
       };
 
       this.worker.addEventListener('message', onReady);
-      this.worker.postMessage({ type: 'init', payload: { wasmPath } });
+      this.worker.postMessage({ type: 'init', payload: { wasmPath, intrinsics } });
     });
   }
 

@@ -1,12 +1,9 @@
 // Web Worker for heavy CV processing — runs off main thread
-import { loadOpenCV, getOpenCV, isOpenCVLoaded } from './WasmLoader';
-import { FeatureDetector, Keypoint } from './FeatureDetector';
-import { FeatureMatcher, MatchResult } from './FeatureMatcher';
+import { loadOpenCV } from './WasmLoader';
+import { SLAMEngine, SLAMFrameResult } from '../slam/SLAMEngine';
+import { CameraIntrinsics } from '../math/Projection';
 
-let detector: FeatureDetector | null = null;
-let matcher: FeatureMatcher | null = null;
-let prevDescriptors: any = null;
-let prevKeypoints: Keypoint[] = [];
+let slam: SLAMEngine | null = null;
 let initialized = false;
 
 export interface CVWorkerMessage {
@@ -25,7 +22,7 @@ self.onmessage = async (e: MessageEvent<CVWorkerMessage>) => {
   try {
     switch (type) {
       case 'init':
-        await handleInit(payload?.wasmPath);
+        await handleInit(payload?.wasmPath, payload?.intrinsics);
         break;
       case 'processFrame':
         handleProcessFrame(payload);
@@ -40,10 +37,14 @@ self.onmessage = async (e: MessageEvent<CVWorkerMessage>) => {
   }
 };
 
-async function handleInit(wasmPath?: string) {
+async function handleInit(wasmPath?: string, intrinsics?: CameraIntrinsics) {
   await loadOpenCV(wasmPath);
-  detector = new FeatureDetector(500);
-  matcher = new FeatureMatcher(0.75);
+
+  if (!intrinsics) {
+    throw new Error('Camera intrinsics required for SLAM init');
+  }
+
+  slam = new SLAMEngine(intrinsics);
   initialized = true;
   respond({ type: 'ready' });
 }
@@ -52,9 +53,8 @@ function handleProcessFrame(payload: {
   imageData: { data: Uint8ClampedArray; width: number; height: number };
   timestamp: number;
 }) {
-  if (!initialized || !detector || !matcher) return;
+  if (!initialized || !slam) return;
 
-  const cv = getOpenCV();
   const { imageData, timestamp } = payload;
 
   // Reconstruct ImageData in worker
@@ -64,54 +64,29 @@ function handleProcessFrame(payload: {
     imageData.height,
   );
 
-  // Convert to grayscale
-  const gray = detector.imageToGray(imgData);
+  // Run full SLAM pipeline
+  const result: SLAMFrameResult = slam.processFrame(imgData);
 
-  // Detect features
-  const detection = detector.detect(gray);
-
-  // Match with previous frame
-  let matchResult: MatchResult | null = null;
-  if (prevDescriptors && prevDescriptors.rows > 0 && detection.descriptors.rows > 0) {
-    matchResult = matcher.match(
-      prevDescriptors,
-      detection.descriptors,
-      prevKeypoints,
-      detection.keypoints,
-    );
-  }
-
-  // Store current frame data for next match
-  if (prevDescriptors) {
-    prevDescriptors.delete();
-  }
-  prevDescriptors = detection.descriptors.clone();
-  prevKeypoints = [...detection.keypoints];
-
-  // Clean up
-  gray.delete();
-  detection.descriptors.delete();
-
+  // Serialize rotation/translation as arrays for transfer
   respond({
     type: 'frameResult',
     payload: {
       timestamp,
-      keypoints: detection.keypoints,
-      matchCount: matchResult?.matches.length ?? 0,
-      matches: matchResult?.matches.slice(0, 100) ?? [], // limit for transfer size
+      state: result.state,
+      rotation: result.rotation ? Array.from(result.rotation) : null,
+      translation: result.translation ? Array.from(result.translation) : null,
+      keypoints: result.keypoints,
+      mapPointCount: result.mapPointCount,
+      keyframeCount: result.keyframeCount,
+      inlierCount: result.inlierCount,
+      matchCount: result.matchCount,
     },
   });
 }
 
 function handleDispose() {
-  detector?.dispose();
-  matcher?.dispose();
-  if (prevDescriptors) {
-    prevDescriptors.delete();
-    prevDescriptors = null;
-  }
-  detector = null;
-  matcher = null;
+  slam?.dispose();
+  slam = null;
   initialized = false;
 }
 

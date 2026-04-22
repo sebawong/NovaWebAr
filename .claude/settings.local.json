@@ -14,7 +14,10 @@
       "Bash(ipconfig)",
       "Bash(curl -sk https://localhost:3000/ -o /dev/null -w \"%{http_code}\")",
       "Bash(netsh advfirewall:*)",
-      "Bash(npx --yes localtunnel --port 3000 --local-https --allow-invalid-cert)"
+      "Bash(npx --yes localtunnel --port 3000 --local-https --allow-invalid-cert)",
+      "Bash(gh repo:*)",
+      "Bash(npx firebase:*)",
+      "Bash(cd:*)"
     ]
   }
 }
